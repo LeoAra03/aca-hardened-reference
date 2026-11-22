@@ -31,10 +31,18 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Build Bicep
-        run: az bicep build --file bicep/main.bicep --stdout > main.json
+        run: az bicep build --file hardened/main.bicep --stdout > main.json
 
       - name: What-if
-        run: az deployment group create -g "$RG" -f bicep/main.bicep -p location="$LOC" budgetEmail="${{ vars.BUDGET_EMAIL }}" --what-if
+        run: |
+          SAMPLE_SECRET=$(openssl rand -hex 16)
+          az deployment group create -g "$RG" -f hardened/main.bicep \
+            -p location="$LOC" sampleSecret="$SAMPLE_SECRET" \
+            budgetEmail="${{ vars.BUDGET_EMAIL }}" --what-if
 
       - name: Deploy
-        run: az deployment group create -g "$RG" -f bicep/main.bicep -p location="$LOC" budgetEmail="${{ vars.BUDGET_EMAIL }}"
+        run: |
+          SAMPLE_SECRET=$(openssl rand -hex 16)
+          az deployment group create -g "$RG" -f hardened/main.bicep \
+            -p location="$LOC" sampleSecret="$SAMPLE_SECRET" \
+            budgetEmail="${{ vars.BUDGET_EMAIL }}"

@@ -1,0 +1,52 @@
+{
+  "resources": [
+    {
+      "type": "Microsoft.App/containerApps",
+      "name": "aca-insecure-app",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "configuration": {
+          "ingress": {
+            "external": true,
+            "allowInsecure": true,
+            "targetPort": 80,
+            "transport": "http"
+          }
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "web",
+              "image": "nginx:latest",
+              "env": [
+                {
+                  "name": "DB_PASSWORD",
+                  "value": "SuperSecret123!"
+                },
+                {
+                  "name": "API_KEY",
+                  "value": "sk-live-000000000000000000000000"
+                }
+              ]
+            }
+          ],
+          "scale": {
+            "minReplicas": 0,
+            "maxReplicas": 2
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "name": "00000000-0000-0000-0000-000000000001",
+      "scope": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-aca-insecure",
+      "properties": {
+        "roleDefinitionId": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Authorization/roleDefinitions/b2497c52-6040-4519-a36c-8a0f3c35f8d2",
+        "principalType": "ServicePrincipal"
+      }
+    }
+  ]
+}

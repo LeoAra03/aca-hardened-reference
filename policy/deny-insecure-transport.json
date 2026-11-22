@@ -1,0 +1,28 @@
+{
+  "properties": {
+    "displayName": "Deny insecure transport (allowInsecure) on Container Apps",
+    "description": "Denies Container Apps with allowInsecure=true. Plain HTTP must not be exposed; use HTTPS or internal ingress.",
+    "metadata": {
+      "category": "Container Apps",
+      "version": "1.0.0"
+    },
+    "mode": "All",
+    "rules": {
+      "if": {
+        "allOf": [
+          {
+            "field": "type",
+            "equals": "Microsoft.App/containerApps"
+          },
+          {
+            "field": "properties.configuration.ingress.allowInsecure",
+            "equals": true
+          }
+        ]
+      },
+      "then": {
+        "effect": "deny"
+      }
+    }
+  }
+}

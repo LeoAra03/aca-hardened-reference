@@ -1,7 +1,8 @@
 # Local Azure / Bicep artifacts
 .azure/
-bicep/main.json
-bicep/modules/*.json
+hardened/main.json
+insecure/main.json
+policy/assignment.json
 
 # Secrets and local config — never commit
 .env
@@ -13,3 +14,5 @@ bicep/modules/*.json
 .DS_Store
 .idea/
 .vscode/
+__pycache__/
+*.pyc

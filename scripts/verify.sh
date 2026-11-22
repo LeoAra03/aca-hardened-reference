@@ -1,34 +1,53 @@
 #!/usr/bin/env bash
-# Asserts the hardened posture: internal ingress, user-assigned identity,
-# ACR admin disabled, no :latest. Static checks always run; live checks
-# run when the resource group exists.
+# Asserts the hardened posture: internal ingress, IP restrictions,
+# user-assigned identity, ACR admin disabled, no :latest, Key Vault refs,
+# minReplicas 1. Static checks always run; live checks run when the
+# resource group exists.
 set -euo pipefail
 
 RG="${RG:-rg-aca-ref}"
-APP="${APP:-ca-hello}"
+APP="${APP:-aca-hardened-app}"
 fail=0
 
 pass() { echo "PASS: $1"; }
 fail_msg() { echo "FAIL: $1"; fail=1; }
 
-echo "== Static checks (bicep / policy) =="
+echo "== Static checks (hardened/ + policy) =="
 
-if grep -q "adminUserEnabled: false" bicep/modules/acr.bicep; then
-  pass "ACR admin user disabled in bicep"
+if grep -q "adminUserEnabled: false" hardened/main.bicep; then
+  pass "ACR admin user disabled in hardened bicep"
 else
   fail_msg "ACR adminUserEnabled must be false"
 fi
 
-if grep -q "param externalIngress bool = false" bicep/main.bicep bicep/modules/aca.bicep; then
-  pass "externalIngress defaults to false"
+if grep -q "external: false" hardened/main.bicep; then
+  pass "ingress is internal in hardened bicep"
 else
-  fail_msg "externalIngress must default to false"
+  fail_msg "hardened ingress must be internal (external: false)"
 fi
 
-if grep -rq ":latest" bicep/; then
-  fail_msg "no :latest image tag allowed in bicep"
+if grep -q "ipSecurityRestrictions" hardened/main.bicep; then
+  pass "IP restrictions present"
 else
-  pass "no :latest in bicep"
+  fail_msg "hardened must set ipSecurityRestrictions"
+fi
+
+if grep -q "keyVaultUrl" hardened/main.bicep; then
+  pass "secrets come from Key Vault"
+else
+  fail_msg "hardened must use keyVaultUrl"
+fi
+
+if grep -q "minReplicas: 1" hardened/main.bicep; then
+  pass "minReplicas is 1"
+else
+  fail_msg "hardened minReplicas must be 1"
+fi
+
+if grep -q ":latest" hardened/main.bicep; then
+  fail_msg "no :latest image tag allowed in hardened bicep"
+else
+  pass "no :latest in hardened bicep"
 fi
 
 for f in policy/*.json; do

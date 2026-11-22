@@ -14,7 +14,7 @@ This reference is designed to cost almost nothing when idle and to be impossible
 
 ## Expected totals
 
-- **Idle (deployed, no traffic):** a few cents per day. The environment and app scale to zero; the only standing charge is the Basic ACR.
+- **Idle (deployed, no traffic):** a few cents per day. One replica stays warm (`minReplicas: 1`); the only other standing charge is the Basic ACR.
 - **Full day of use:** under 5 EUR, including a day of active replicas and log ingestion.
 - **Worst case:** the 20 EUR budget alarm fires at 80% (16 EUR) and again at 100%, so a forgotten environment cannot surprise you.
 
