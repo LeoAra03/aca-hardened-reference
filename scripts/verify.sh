@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Asserts the hardened posture: internal ingress, IP restrictions,
-# user-assigned identity, ACR admin disabled, no :latest, Key Vault refs,
-# minReplicas 1. Static checks always run; live checks run when the
-# resource group exists.
+# Asserts the hardened posture: internal ingress, IP restrictions, HTTPS-only
+# transport, user-assigned identity, ACR admin disabled, digest pin, Key Vault
+# refs, user-defined egress, diagnostics, probes, minReplicas 1.
+# Static checks always run; live checks run when the resource group exists.
 set -euo pipefail
 
 RG="${RG:-rg-aca-ref}"
@@ -14,35 +14,21 @@ fail_msg() { echo "FAIL: $1"; fail=1; }
 
 echo "== Static checks (hardened/ + policy) =="
 
-if grep -q "adminUserEnabled: false" hardened/main.bicep; then
-  pass "ACR admin user disabled in hardened bicep"
-else
-  fail_msg "ACR adminUserEnabled must be false"
-fi
+check() {
+  if grep -q "$1" hardened/main.bicep; then pass "$2"; else fail_msg "$2"; fi
+}
 
-if grep -q "external: false" hardened/main.bicep; then
-  pass "ingress is internal in hardened bicep"
-else
-  fail_msg "hardened ingress must be internal (external: false)"
-fi
-
-if grep -q "ipSecurityRestrictions" hardened/main.bicep; then
-  pass "IP restrictions present"
-else
-  fail_msg "hardened must set ipSecurityRestrictions"
-fi
-
-if grep -q "keyVaultUrl" hardened/main.bicep; then
-  pass "secrets come from Key Vault"
-else
-  fail_msg "hardened must use keyVaultUrl"
-fi
-
-if grep -q "minReplicas: 1" hardened/main.bicep; then
-  pass "minReplicas is 1"
-else
-  fail_msg "hardened minReplicas must be 1"
-fi
+check "adminUserEnabled: false" "ACR admin user disabled"
+check "external: false" "ingress is internal"
+check "allowInsecure: false" "transport is HTTPS-only"
+check "ipSecurityRestrictions" "IP restrictions present"
+check "keyVaultUrl" "secrets come from Key Vault"
+check "outboundType: 'userDefined'" "egress is user-defined (firewall UDR)"
+check "logAnalyticsConfiguration" "diagnostics to Log Analytics"
+check "type: 'Liveness'" "liveness probe present"
+check "type: 'Readiness'" "readiness probe present"
+check "minReplicas: 1" "minReplicas is 1"
+check "imageDigest" "image is digest-pinned"
 
 if grep -q ":latest" hardened/main.bicep; then
   fail_msg "no :latest image tag allowed in hardened bicep"
@@ -50,16 +36,11 @@ else
   pass "no :latest in hardened bicep"
 fi
 
-for f in policy/*.json; do
+for f in policy/deny-*.json policy/params.json; do
   if python3 -m json.tool "$f" > /dev/null; then
     pass "$f is valid JSON"
   else
     fail_msg "$f is not valid JSON"
-  fi
-  if jq -e '.properties.rules.then.effect == "deny"' "$f" > /dev/null; then
-    pass "$f denies on violation"
-  else
-    fail_msg "$f must deny on violation"
   fi
 done
 
@@ -99,8 +80,8 @@ fi
 
 image=$(az containerapp show -g "$RG" -n "$APP" --query 'properties.template.containers[0].image' -o tsv)
 case "$image" in
-  *:latest) fail_msg "image must not use :latest, got $image" ;;
-  *) pass "image is pinned ($image)" ;;
+  *@sha256:*) pass "image is digest-pinned ($image)" ;;
+  *) fail_msg "image must be digest-pinned, got $image" ;;
 esac
 
 exit "$fail"

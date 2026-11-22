@@ -15,7 +15,7 @@ permissions:
 
 env:
   RG: rg-aca-ref
-  LOC: westeurope
+  LOC: eastus
 
 jobs:
   deploy:

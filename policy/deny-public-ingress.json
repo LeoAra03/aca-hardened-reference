@@ -1,28 +1,66 @@
 {
-  "properties": {
-    "displayName": "Deny public Container Apps ingress",
-    "description": "Denies Container Apps with external (public) ingress. Internal ingress is the only allowed default; exposure requires an explicit policy exception.",
-    "metadata": {
-      "category": "Container Apps",
-      "version": "1.0.0"
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "policyName": {
+      "type": "string",
+      "defaultValue": "deny-aca-public-ingress"
     },
-    "mode": "All",
-    "rules": {
-      "if": {
-        "allOf": [
-          {
-            "field": "type",
-            "equals": "Microsoft.App/containerApps"
+    "effect": {
+      "type": "string",
+      "defaultValue": "deny",
+      "allowedValues": [
+        "deny",
+        "audit"
+      ]
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Authorization/policyDefinitions",
+      "apiVersion": "2023-04-01",
+      "name": "[parameters('policyName')]",
+      "properties": {
+        "displayName": "Deny public Container Apps ingress",
+        "description": "Denies Container Apps with external ingress or without IP restrictions. Internal ingress with ipSecurityRestrictions is the only allowed shape.",
+        "metadata": "{\"category\":\"Container Apps\",\"version\":\"1.0.0\"}",
+        "mode": "All",
+        "policyRule": {
+          "if": {
+            "allOf": [
+              {
+                "field": "type",
+                "equals": "Microsoft.App/containerApps"
+              },
+              {
+                "anyOf": [
+                  {
+                    "field": "properties.configuration.ingress.external",
+                    "equals": true
+                  },
+                  {
+                    "field": "properties.configuration.ingress.ipSecurityRestrictions[*]",
+                    "exists": false
+                  }
+                ]
+              }
+            ]
           },
-          {
-            "field": "properties.configuration.ingress.external",
-            "equals": true
+          "then": {
+            "effect": "[parameters('effect')]"
           }
-        ]
-      },
-      "then": {
-        "effect": "deny"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/policyAssignments",
+      "apiVersion": "2023-04-01",
+      "name": "[concat(parameters('policyName'), '-assign')]",
+      "properties": {
+        "displayName": "Deny public Container Apps ingress (assignment)",
+        "enforcementMode": "Default",
+        "policyDefinitionId": "[reference(resourceId('Microsoft.Authorization/policyDefinitions', parameters('policyName')), '2023-04-01').id]"
       }
     }
-  }
+  ]
 }

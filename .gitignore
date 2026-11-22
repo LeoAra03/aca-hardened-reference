@@ -1,8 +1,5 @@
-# Local Azure / Bicep artifacts
-.azure/
 hardened/main.json
 insecure/main.json
-policy/assignment.json
 
 # Secrets and local config — never commit
 .env

@@ -1,11 +1,9 @@
-// INSECURE — the "before". Same app, deployed the way a quick sample does it:
-// public ingress, plain HTTP, plaintext secrets in env vars, a system-assigned
-// identity with Contributor on the whole resource group, and a :latest image.
-// Every line here is what the policies in ../policy deny. Do not deploy this
-// to a real subscription.
+// INSECURE — deployable, plausible, wrong. This is the default output of
+// most scaffolding tools: public ingress, plain HTTP, literal secrets,
+// no identity, :latest image, no diagnostics, no probes.
 targetScope = 'resourceGroup'
 
-param location string = 'westeurope'
+param location string = 'eastus'
 param namePrefix string = 'aca-insecure'
 
 resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
@@ -19,16 +17,14 @@ resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
   name: '${namePrefix}-app'
   location: location
-  identity: {
-    type: 'SystemAssigned'
-  }
+  // No identity block: the app runs with no managed identity at all.
   properties: {
     managedEnvironmentId: env.id
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: {
-        external: true // public FQDN, reachable from the internet
-        allowInsecure: true // plain HTTP, no TLS
+        external: true // public FQDN, reachable from anywhere
+        allowInsecure: true // plain HTTP, bearer tokens in cleartext
         targetPort: 80
         transport: 'http'
       }
@@ -37,7 +33,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'web'
-          image: 'nginx:latest' // mutable tag, unreproducible deploys
+          image: 'nginx:latest' // mutable tag, no rollback target
           resources: {
             cpu: 0.25
             memory: '0.5Gi'
@@ -45,31 +41,21 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           env: [
             {
               name: 'DB_PASSWORD'
-              value: 'SuperSecret123!' // plaintext secret in the template
+              value: 'SuperSecret123!' // literal secret, visible in ARM history
             }
             {
               name: 'API_KEY'
-              value: 'sk-live-000000000000000000000000' // plaintext secret
+              value: 'sk-live-000000000000000000000000' // literal secret
             }
           ]
+          // No probes: traffic goes to half-started replicas.
         }
       ]
       scale: {
-        minReplicas: 0
+        minReplicas: 0 // cold starts mask DoS as "slow app"
         maxReplicas: 2
       }
     }
-  }
-}
-
-// The app identity gets Contributor on the entire resource group:
-// it can read/write/delete everything in the RG, not just pull images.
-resource contributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, app.identity.principalId, 'Contributor')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b2497c52-6040-4519-a36c-8a0f3c35f8d2')
-    principalId: app.identity.principalId
-    principalType: 'ServicePrincipal'
   }
 }
 

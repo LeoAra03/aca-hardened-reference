@@ -1,22 +1,67 @@
-// HARDENED — the "after". Same app, deployed the way you would hand it to a
-// security reviewer: internal ingress with IP restrictions, Key Vault
-// references instead of plaintext secrets, a user-assigned managed identity
-// with least-privilege roles (AcrPull + Key Vault Secrets User), a pinned
-// image, and minReplicas 1 so it is always up.
+// HARDENED — the corrected version, one control at a time. Internal
+// ingress with IP restrictions, HTTPS-only transport, Key Vault references,
+// user-assigned identity with least-privilege roles, digest-pinned image,
+// minReplicas 1, user-defined egress via firewall UDR, Log Analytics
+// diagnostics, and liveness + readiness probes.
 targetScope = 'resourceGroup'
 
-param location string = 'westeurope'
+param location string = 'eastus'
 param namePrefix string = 'aca-hardened'
 // Replace with the CIDR that is allowed to reach the app.
 param allowedCidr string = '10.0.0.0/8'
 param imageName string = 'hello'
-// Pinned tag — never the mutable latest tag (see policy/deny-latest-tag.json).
-// Push your image to the ACR created below before first deploy.
 param imageTag string = '1.0.0'
+// Digest pin, never a mutable tag. Get the real digest with:
+//   az acr repository show --name <acr> --image hello:1.0.0 --query digest
+param imageDigest string = 'sha256:0000000000000000000000000000000000000000000000000000000000000000'
+// Placeholder firewall IP. The egress UDR assumes a firewall that is not
+// in this repo — replace with your Azure Firewall / appliance address.
+param firewallIp string = '10.0.0.4'
 // Stored in Key Vault, referenced by the app — never in env vars.
 param sampleSecret secureString
 param budgetEmail string = ''
 param retentionDays int = 30
+
+// --- Egress: user-defined outbound via UDR to firewall ---
+resource udr 'Microsoft.Network/routeTables@2023-11-01' = {
+  name: '${namePrefix}-udr'
+  location: location
+  properties: {
+    routes: [
+      {
+        name: 'to-firewall'
+        properties: {
+          addressPrefix: '0.0.0.0/0'
+          nextHopType: 'VirtualAppliance'
+          nextHopInIpAddress: firewallIp
+        }
+      }
+    ]
+  }
+}
+
+resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+  name: '${namePrefix}-vnet'
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        '10.0.0.0/16'
+      ]
+    }
+  }
+}
+
+resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
+  parent: vnet
+  name: 'aca-subnet'
+  properties: {
+    addressPrefix: '10.0.0.0/23'
+    routeTable: {
+      id: udr.id
+    }
+  }
+}
 
 resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: '${namePrefix}-id'
@@ -92,6 +137,11 @@ resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: '${namePrefix}-env'
   location: location
   properties: {
+    vnetConfiguration: {
+      internalOnly: true
+      outboundType: 'userDefined' // egress via UDR to firewall, inspected
+      subnetId: subnet.id
+    }
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
@@ -118,6 +168,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       activeRevisionsMode: 'Single'
       ingress: {
         external: false // internal only — no public FQDN
+        allowInsecure: false // HTTPS only
         targetPort: 8080
         transport: 'http'
         ipSecurityRestrictions: [
@@ -148,7 +199,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'hello'
-          image: '${acr.properties.loginServer}/${imageName}:${imageTag}'
+          image: '${acr.properties.loginServer}/${imageName}@${imageDigest}' // digest pin
           resources: {
             cpu: 0.25
             memory: '0.5Gi'
@@ -163,17 +214,26 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             {
               type: 'Liveness'
               httpGet: {
-                path: '/'
+                path: '/healthz'
                 port: 8080
               }
               initialDelaySeconds: 5
               periodSeconds: 30
             }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/readyz'
+                port: 8080
+              }
+              initialDelaySeconds: 5
+              periodSeconds: 10
+            }
           ]
         }
       ]
       scale: {
-        minReplicas: 1 // always up — availability baseline
+        minReplicas: 1 // always up — no cold-start auth timeouts
         maxReplicas: 2
       }
     }

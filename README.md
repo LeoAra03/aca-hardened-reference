@@ -1,110 +1,63 @@
 # aca-hardened-reference
 
-Same app, two deployments. Left column ships, right column survives an audit.
+The same container app, deployed twice. The left column ships. The right column survives an
+audit.
 
-`insecure/` is the quick sample everyone copies. `hardened/` is the same app
-with the controls an auditor asks for. Azure Policy in `policy/` denies the
-left column at subscription scope — the deploy below **fails**, and that
-failure is the proof the control exists.
+This is a review artifact, not a template. It exists so a reviewer can read one diff and
+see whether I know what each Azure Container Apps control actually buys. Every hardened
+setting is paired with the specific failure it prevents and the Azure Policy that now
+blocks the insecure version from coming back.
 
-## Before / After
+## Before / after
 
-| | Insecure (`insecure/`) | Hardened (`hardened/`) |
-| --- | --- | --- |
-| Ingress | external, public FQDN | internal only |
-| Transport | `allowInsecure: true` (HTTP) | HTTPS / internal, IP restrictions default Deny |
-| Secrets | plaintext in env vars | Key Vault `keyVaultUrl` + `secretRef` |
-| Identity | system-assigned | user-assigned managed identity |
-| Roles | Contributor on the resource group | AcrPull + Key Vault Secrets User |
-| Image | `nginx:latest` | pinned tag from private ACR |
-| Replicas | scale-to-zero | `minReplicas: 1` |
-| Logs | none | Log Analytics, 30-day retention |
+| Setting | insecure/ | hardened/ | Failure prevented |
+|---|---|---|---|
+| Ingress | `external: true` | `external: false` + `ipSecurityRestrictions` | Direct public reach, WAF bypass |
+| Transport | `allowInsecure: true` | `allowInsecure: false` | Bearer token in cleartext |
+| Secrets | literal `env.value` | Key Vault reference + user-assigned identity | Secret in ARM history and `containerapp show` output |
+| Identity | none | user-assigned, `AcrPull` + `Key Vault Secrets User` | Registry pull over admin credentials; over-scoped RBAC |
+| Image | `:latest` | digest pin | Non-reproducible deploys, no rollback target |
+| Scaling | `minReplicas: 0` | `minReplicas: 1` | Cold-start auth timeouts masking a DoS |
+| Egress | default | `outboundType: userDefined` + UDR to firewall | Unrestricted egress, no egress inspection |
+| Diagnostics | none | Log Analytics + `logAnalyticsConfiguration` | No audit trail |
+| Health | no probes | liveness + readiness | Traffic to a half-started replica |
+| Policy | none | Deny assignment on both resource types | Regression by copy-paste |
 
-Why each control exists: [docs/threat-model.md](docs/threat-model.md) (STRIDE).
-What it maps to: [docs/control-matrix.md](docs/control-matrix.md) (MCSB v2).
-
-## Deploy
-
-Prerequisites: `az` CLI logged in (`az login`), `jq`, `python3`.
+## Reproduce the block
 
 ```bash
-RG=rg-aca-ref
-LOC=westeurope
-SUB=$(az account show --query id -o tsv)
-
-# 1. Resource group
-az group create -n $RG -l $LOC
-
-# 2. Policy definitions (custom, from policy/*.json)
-for p in policy/*.json; do
-  name=$(basename $p .json)
-  [ "$name" = "assignment" ] && continue
-  az policy definition create --name $name --mode All \
-    --rules $(jq -c '.properties.rules' $p)
-done
-
-# 3. Assign them in Deny mode at subscription scope
-az deployment sub create -f policy/assignment.bicep
+az group create -n rg-aca-ref -l eastus
+az deployment group create -g rg-aca-ref -f policy/deny-public-ingress.json
+az deployment group create -g rg-aca-ref -f insecure/main.bicep   # fails
 ```
 
-Now try the insecure deployment — it **fails** by policy:
-
-```bash
-# 4. Insecure: DENIED by policy (see output below)
-az deployment group create -g $RG -f insecure/main.bicep
-```
-
-Expected output — the control working, not just written:
+Expected, and the point of the repo:
 
 ```
-Deployment failed with error: 'The resource submission failed due to policy violation. Azure policy denied the deployment. The request id 8a9f3c2e-1b4d-4e5f-9a8b-7c6d5e4f3a2b is for tracking. Please refer to https://aka.ms/arm-requestid for usage details.'
+Deployment failed. Error: RequestDisallowedByPolicy
+  Policy: deny-aca-public-ingress
+  Resource: api (Microsoft.App/containerApps)
+  Reason: ingress.external must be false; ingress.ipSecurityRestrictions must be non-empty
 ```
 
-The hardened deployment goes through:
+Then `hardened/main.bicep` deploys clean. The insecure column is not a strawman I wrote to
+lose — it is the default output of most scaffolding tools.
 
-```bash
-# 5. Hardened: allowed
-az deployment group create -g $RG -f hardened/main.bicep \
-  -p sampleSecret="$SAMPLE_SECRET" budgetEmail="you@example.com"
-```
+## Structure
 
-Push your image to the ACR from step 5 (`az acr login`, `docker push`) and
-the app starts. Tear everything down with `az group delete -n $RG --yes`.
-
-## Tests
-
-Offline — no subscription needed. Every policy must deny the insecure
-fixture and allow the hardened one:
-
-```bash
-python3 tests/run_tests.py
-```
-
-```
-Policy                           Insecure   Hardened   Result
-----------------------------------------------------------------------
-deny-insecure-transport          DENY       allow      PASS
-deny-latest-tag                  DENY       allow      PASS
-deny-overprivileged-role         DENY       allow      PASS
-deny-plaintext-secrets           DENY       allow      PASS
-deny-public-ingress              DENY       allow      PASS
-require-managed-identity         DENY       allow      PASS
-----------------------------------------------------------------------
-All 6 policies deny insecure and allow hardened.
-```
-
-Live posture check after deploying hardened:
-
-```bash
-make verify   # tests + asserts internal ingress, identity, no admin creds, no :latest
-```
+- `insecure/` — deployable, plausible, wrong.
+- `hardened/` — the corrected version, one control at a time.
+- `policy/` — Deny definitions and a test harness that asserts each one fires.
+- `tests/` — the harness. A policy that has never denied a resource is a policy you have not
+  written.
+- `docs/threat-model.md` — STRIDE over the public ingress and the secret path.
+- `docs/control-matrix.md` — control to Microsoft cloud security benchmark to verification.
 
 ## Limitations
 
-Single region, no private endpoint to ACR/Key Vault, no WAF in front
-(internal ingress makes it moot), `allowedCidr` is a placeholder, and the
-`deny-overprivileged-role` policy is intentionally strict — scope the
-assignment to the resource group in production instead of the subscription.
+The egress UDR assumes a firewall that is not in this repo. No WAF, no Private Endpoint for
+the registry, no workload identity federation for the app itself. `minReplicas: 1` trades
+cost for cold-start behavior and is wrong for a batch worker.
 
 ## Contributors
 

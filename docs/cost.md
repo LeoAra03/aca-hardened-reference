@@ -7,7 +7,7 @@ This reference is designed to cost almost nothing when idle and to be impossible
 | Resource | Billing | Idle cost |
 | --- | --- | --- |
 | Container Apps Environment | Consumption plan, per vCPU/memory-second while running | ~0 EUR at 0 replicas |
-| Container App | Scale-to-zero (`minReplicas: 0`) | 0 EUR when scaled to zero |
+| Container App | `minReplicas: 1` (always up) | ~0.25 vCPU + 0.5 Gi always on, a few EUR/month |
 | Container Registry (Basic) | Flat monthly fee | ~5 EUR/month if left up |
 | Log Analytics workspace | Per GB ingested, 30-day retention | First 5 GB free, then ~2.30 EUR/GB |
 | Managed identity, policy, budget | Free | 0 EUR |
