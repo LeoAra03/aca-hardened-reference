@@ -1,0 +1,31 @@
+{
+  "properties": {
+    "displayName": "Require user-assigned managed identity on Container Apps",
+    "description": "Denies Container Apps that do not use a user-assigned managed identity. No connection strings, no registry passwords — identity only.",
+    "metadata": {
+      "category": "Container Apps",
+      "version": "1.0.0"
+    },
+    "mode": "All",
+    "rules": {
+      "if": {
+        "allOf": [
+          {
+            "field": "type",
+            "equals": "Microsoft.App/containerApps"
+          },
+          {
+            "field": "identity.type",
+            "notIn": [
+              "UserAssigned",
+              "UserAssigned,SystemAssigned"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "effect": "deny"
+      }
+    }
+  }
+}

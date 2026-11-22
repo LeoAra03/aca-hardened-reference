@@ -1,0 +1,28 @@
+{
+  "properties": {
+    "displayName": "Deny public Container Apps ingress",
+    "description": "Denies Container Apps with external (public) ingress. Internal ingress is the only allowed default; exposure requires an explicit policy exception.",
+    "metadata": {
+      "category": "Container Apps",
+      "version": "1.0.0"
+    },
+    "mode": "All",
+    "rules": {
+      "if": {
+        "allOf": [
+          {
+            "field": "type",
+            "equals": "Microsoft.App/containerApps"
+          },
+          {
+            "field": "properties.configuration.ingress.external",
+            "equals": true
+          }
+        ]
+      },
+      "then": {
+        "effect": "deny"
+      }
+    }
+  }
+}

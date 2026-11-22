@@ -1,0 +1,45 @@
+# Policy-as-code gate: valid deny policies, no public ingress, no :latest,
+# no ACR admin, no secrets in bicep. Runs on every PR.
+name: policy-check
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate policy definitions
+        run: |
+          python3 - <<'PY'
+          import json, glob, sys
+          ok = True
+          for path in sorted(glob.glob("policy/*.json")):
+              with open(path) as f:
+                  d = json.load(f)
+              rules = d["properties"]["rules"]
+              assert rules["then"]["effect"] == "deny", f"{path}: effect must be deny"
+              assert d["properties"]["mode"] == "All", f"{path}: mode must be All"
+              print(f"OK {path}")
+          print("All policies valid")
+          PY
+
+      - name: No public ingress by default
+        run: |
+          grep -q "param externalIngress bool = false" bicep/main.bicep
+          grep -q "param externalIngress bool = false" bicep/modules/aca.bicep
+
+      - name: No ACR admin, no :latest, no hardcoded secrets
+        run: |
+          grep -q "adminUserEnabled: false" bicep/modules/acr.bicep
+          if grep -rq ":latest" bicep/; then echo "::error::no :latest allowed"; exit 1; fi
+          # Hardcoded secret values only (comments mentioning secrets are fine).
+          if grep -rniE "(password|connectionString|secretValue)\s*:\s*['\"]" bicep/; then echo "::error::hardcoded secret in bicep"; exit 1; fi
+          echo "Bicep posture OK"

@@ -1,0 +1,15 @@
+# Local Azure / Bicep artifacts
+.azure/
+bicep/main.json
+bicep/modules/*.json
+
+# Secrets and local config — never commit
+.env
+*.env
+*.pem
+*.key
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
