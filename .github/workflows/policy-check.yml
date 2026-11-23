@@ -1,0 +1,59 @@
+# Policy-as-code gate: valid deny policies, hardened posture on every PR.
+# The live harness (tests/run-policy-tests.sh) runs on manual dispatch only,
+# since it deploys into Azure.
+name: policy-check
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate policy templates
+        run: |
+          for f in policy/deny-*.json policy/params.json; do
+            python3 -m json.tool "$f" > /dev/null
+            echo "OK $f"
+          done
+          grep -q "deny-aca-public-ingress" policy/deny-public-ingress.json
+          grep -q "deny-aca-literal-secrets" policy/deny-literal-secrets.json
+
+      - name: Harness syntax
+        run: bash -n tests/run-policy-tests.sh && echo "run-policy-tests.sh OK"
+
+      - name: Hardened posture
+        run: |
+          grep -q "external: false" hardened/main.bicep
+          grep -q "allowInsecure: false" hardened/main.bicep
+          grep -q "adminUserEnabled: false" hardened/main.bicep
+          grep -q "keyVaultUrl" hardened/main.bicep
+          grep -q "outboundType: 'userDefined'" hardened/main.bicep
+          grep -q "minReplicas: 1" hardened/main.bicep
+          if grep -q ":latest" hardened/main.bicep; then echo "::error::no :latest in hardened"; exit 1; fi
+          echo "Hardened posture OK"
+
+  live:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Live policy tests
+        run: bash tests/run-policy-tests.sh

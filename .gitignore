@@ -1,0 +1,15 @@
+hardened/main.json
+insecure/main.json
+
+# Secrets and local config — never commit
+.env
+*.env
+*.pem
+*.key
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+*.pyc
